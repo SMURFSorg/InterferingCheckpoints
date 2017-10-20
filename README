@@ -1,0 +1,29 @@
+Simulator for computing waste due to failures and rollback recoveries
+in shared HPC environments. Used in [1] to evaluate the performance of
+the different strategies.
+
+src/App.C src/App.h -- Class for one application. Represents the current
+                       status of an application, keeps its list of future tasks
+src/SchedEvent.h src/SchedEvent.C -- Class for one scheduling event. Represents
+                                     what applications are scheduled to execute at
+                                     this time.
+src/Simulation.h src/Simulation.C -- Class to manage a simulation. Keeps track of
+                                     all tasks, implement the different versions
+                                     of the I/O scheduling algorithms and checkpointing 
+                                     strategies.
+src/System.h src/System.C -- Class that represents the main constants and characteristics
+                             of the system; what application classes are instantiated on that
+                             system
+src/AppClass.h src/AppClass.C -- Class that represents each application class, its main characteristics
+                                 and on what system they execute
+src/Task.h src/Task.C -- Basic tasks (start computing, start checkpointing, end checkpointing, etc...).
+                         Implements the common parts of all algorithms (how to react to faults etc), and
+                         calls on Simulation for strategy-specific operations.
+src/Trace.h src/Trace.C -- Different classes to trace the simulated execution or collect statistics on it
+src/celio.C -- Simulations in Figures 1 and 2 of [1]
+src/prospective.C -- Simulations in Figure 3 of [1]
+
+maple/*.mpl -- Theoeritcal performance model of [1]
+
+[1] T. Herault, Y. Robert, A. Bouteiller, D. Arnold, K. Ferreira, G. Bosilca, J. Dongarra, "Optimal Cooperative Checkpointing for Shared High-Performance Computing Platforms", INRIA RR-9109, 2017
+
