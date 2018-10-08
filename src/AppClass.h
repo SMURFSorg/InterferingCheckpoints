@@ -15,6 +15,7 @@ public:
     simt_t           _wall_time;
     simt_t           io_time;
     simt_t           ckpt_time;
+    simt_t           bb_ckpt_time;
     double           target_resource;
     png_byte         r1, g1, b1;
     png_byte         r2, g2, b2;
@@ -26,6 +27,7 @@ public:
              simt_t _wt,
              simt_t _iot,
              simt_t _ct,
+             simt_t _bb_ct,
              double _tr);
 
     friend std::ostream& operator<< (std::ostream& stream, const AppClass& ac);

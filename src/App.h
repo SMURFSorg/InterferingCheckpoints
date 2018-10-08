@@ -27,6 +27,7 @@ public:
     simt_t           remaining_io;
     double           current_iorate;
     bool             working;
+    bool             checkpointing;
     png_byte         r, g, b;
     int              app_index;
     int              instance_index;
@@ -50,6 +51,10 @@ public:
     void removetask(Task *task);
     void removealltasks(simt_t date);
     
+    void start_checkpointing(void);
+    void stop_checkpointing(void);
+    bool is_checkpointing(void);
+
     void checkpoint_success(simt_t date);
         
     void set_random_color(void);

@@ -32,6 +32,7 @@ App::App(AppClass *_ac, unsigned int *seed) :
     date_start_work(UNDEFINED_DATE),
     current_iorate(1.0),
     working(false),
+    checkpointing(false),
     app_index(next_app_index),
     instance_index(0),
     future_tasks(),
@@ -62,7 +63,7 @@ void App::clear(unsigned int *seed)
     if( remaining_work < 0.0 )
         throw std::runtime_error("Specified application of negative duration");
     nbckpt = remaining_work / ckpt_interval();
-    wall_time = remaining_work + nbckpt * app_class->ckpt_time;
+    wall_time = remaining_work + nbckpt * app_class->bb_ckpt_time;
     wall_time = ceil(1.1 * wall_time);
     if( wall_time < 0.0 )
         throw std::runtime_error("Integer overflow? Walltime is negative...");
@@ -80,6 +81,7 @@ App::App(App *restarting_app) :
     date_start_work(UNDEFINED_DATE),
     current_iorate(1.0),
     working(false),
+    checkpointing(false),
     app_index(restarting_app->app_index),
     instance_index(restarting_app->instance_index+1),
     future_tasks(),
@@ -122,6 +124,20 @@ void App::stop_working(simt_t now) {
     remaining_work = remaining_work - (now-date_start_work);
     date_start_work = UNDEFINED_DATE;
     working = false;
+}
+
+void App::start_checkpointing(void) {
+    if( true == checkpointing ) throw std::runtime_error("The same application started checkpointing twice");
+    checkpointing = true;
+}
+
+void App::stop_checkpointing(void) {
+    if( false == checkpointing ) throw std::runtime_error("The application stopped checkpointing but never started");
+    checkpointing = false;
+}
+
+bool App::is_checkpointing(void) {
+    return checkpointing;
 }
 
 void App::removealltasks(simt_t date) {

@@ -64,7 +64,9 @@ public:
     virtual void start_io(simt_t start_date, App *app) = 0;
     virtual void end_io(simt_t start_date, App *app) = 0;
     virtual bool start_ckpt(simt_t start_date, App *app) = 0;
-    virtual void end_ckpt(simt_t start_date, App *app) = 0;
+    virtual bool end_ckpt(simt_t start_date, App *app) = 0;
+    virtual void start_ckpt_io(simt_t start_ckpt_io, App *app) = 0;
+    virtual void end_ckpt_io(simt_t start_ckpt_io, App *app) = 0;
     
     virtual void clear_app(App *app,simt_t date);
 };
@@ -81,7 +83,29 @@ public:
     void start_io(simt_t start_date, App *app);
     void end_io(simt_t start_date, App *app);
     bool start_ckpt(simt_t start_date, App *app);
-    void end_ckpt(simt_t start_date, App *app);
+    bool end_ckpt(simt_t start_date, App *app);
+    void start_ckpt_io(simt_t start_ckpt_io, App *app) {}
+    void end_ckpt_io(simt_t start_ckpt_io, App *app) {}
+};
+
+/** SimNoInterferenceWithBurstBuffers
+ *    Theoretical model where the I/O subsystem is perfectly scalable
+ *    and uses burst buffers
+ */
+class SimNoInterferenceWithBurstBuffers : public Simulation {
+public:
+ SimNoInterferenceWithBurstBuffers(Schedule *_sched, Trace &t, unsigned int seed, bool inject_failure = true) :
+    Simulation(_sched, t, seed, inject_failure) {}
+    ~SimNoInterferenceWithBurstBuffers();
+
+    void start_io(simt_t start_date, App *app);
+    void end_io(simt_t start_date, App *app);
+    bool start_ckpt(simt_t start_date, App *app);
+    bool end_ckpt(simt_t start_date, App *app);
+    void start_ckpt_io(simt_t start_ckpt_io, App *app);
+    void end_ckpt_io(simt_t start_ckpt_io, App *app);
+
+    void cancel_concurrent_io(App *app);
 };
 
 /** SimSimpleInterference
@@ -100,11 +124,40 @@ public:
     void start_io(simt_t start_date, App *app);
     void end_io(simt_t start_date, App *app);
     bool start_ckpt(simt_t start_date, App *app);
-    void end_ckpt(simt_t start_date, App *app);
+    bool end_ckpt(simt_t start_date, App *app);
+    void start_ckpt_io(simt_t start_ckpt_io, App *app) {}
+    void end_ckpt_io(simt_t start_ckpt_io, App *app) {}
 
     int update_remaining_ios(simt_t date);
     void reschedule_end_ios(int nb_nodes_doing_io, simt_t date);
     void start_remaining_io(simt_t start_date, App *app, AppTaskIO *task);
+};
+
+/** SimSimpleInterferenceWithBurstBuffers
+ *    Two interfering I/O are slowed down proportionnaly to the
+ *    number of nodes doing I/O.
+ **/
+class SimSimpleInterferenceWithBurstBuffers : public Simulation {
+public:
+    simt_t date_of_last_iorate_change;
+
+    SimSimpleInterferenceWithBurstBuffers(Schedule *_sched, Trace &t, unsigned int seed, bool inject_failure = true) :
+        Simulation(_sched, t, seed, inject_failure),
+        date_of_last_iorate_change(UNDEFINED_DATE)
+    {}
+    ~SimSimpleInterferenceWithBurstBuffers();
+
+    void start_io(simt_t start_date, App *app);
+    void end_io(simt_t start_date, App *app);
+    bool start_ckpt(simt_t start_date, App *app);
+    bool end_ckpt(simt_t start_date, App *app);
+    void start_ckpt_io(simt_t start_ckpt_io, App *app);
+    void end_ckpt_io(simt_t start_ckpt_io, App *app);
+
+    int update_remaining_ios(simt_t date);
+    void reschedule_end_ios(int nb_nodes_doing_io, simt_t date);
+    void start_remaining_io(simt_t start_date, App *app, AppTaskIO *task);
+    void cancel_concurrent_io(App *app);
 };
 
 /** SimOrderedIOBlockingFCFS
@@ -123,7 +176,9 @@ public:
     void start_io(simt_t start_date, App *app);
     void end_io(simt_t start_date, App *app);
     bool start_ckpt(simt_t start_date, App *app);
-    void end_ckpt(simt_t start_date, App *app);
+    bool end_ckpt(simt_t start_date, App *app);
+    void start_ckpt_io(simt_t start_ckpt_io, App *app) {}
+    void end_ckpt_io(simt_t start_ckpt_io, App *app) {}
 };
 
 /** SimOrderedIOFCFS
@@ -141,7 +196,9 @@ public:
     void start_io(simt_t start_date, App *app);
     void end_io(simt_t start_date, App *app);
     bool start_ckpt(simt_t start_date, App *app);
-    void end_ckpt(simt_t start_date, App *app);
+    bool end_ckpt(simt_t start_date, App *app);
+    void start_ckpt_io(simt_t start_ckpt_io, App *app) {}
+    void end_ckpt_io(simt_t start_ckpt_io, App *app) {}
 };
 
 /** SimOrderedIOCoop
@@ -175,7 +232,9 @@ public:
     void start_io(simt_t start_date, App *app);
     void end_io(simt_t start_date, App *app);
     bool start_ckpt(simt_t start_date, App *app);
-    void end_ckpt(simt_t start_date, App *app);
+    bool end_ckpt(simt_t start_date, App *app);
+    void start_ckpt_io(simt_t start_ckpt_io, App *app) {}
+    void end_ckpt_io(simt_t start_ckpt_io, App *app) {}
 
     void clear_app(App *app, simt_t date);
 };

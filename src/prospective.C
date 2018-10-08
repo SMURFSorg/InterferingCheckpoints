@@ -140,9 +140,9 @@ static double sim_and_compute_strategy(System &system, Schedule &s, double segme
 }
 
 static double sim_and_compute(double segment_size, unsigned int seed, double min_run, double isr, double ier,
-                              double bw, double mtbf, int runtype)
+                              double bw, double bb_bw, double mtbf, int runtype)
 {
-    System system("prospection", 50000, 160, bw, 140e9, mtbf/50000.0, min_run);
+    System system("prospection", 50000, 160, bw, bb_bw, 140e9, mtbf/50000.0, min_run);
     Schedule s(&system);
 
     system.add_app_class(1638400, 0.03, 1.05, 262.4*3600.0, 0.0, 1.6, 0.6);
@@ -223,6 +223,9 @@ int main(int argc, char *argv[])
     double START_BW = getCmdOption(argv, argv+argc, "-b", 1e12);
     double MAX_BW = getCmdOption(argv, argv+argc, "-B", 1e15);
 
+    double START_BB_BW = getCmdOption(argv, argv+argc, "-bb", 1e10);
+    double MAX_BB_BW = getCmdOption(argv, argv+argc, "-BB", 1e10);
+
     double ignore_start = 24.0*3600.0;               // 1 day
     double ignore_end   = 24.9*3600.0;               // 1 day
     double segment_size = 3.0*31.0*24.0*3600.0;      // 3 months
@@ -235,11 +238,12 @@ int main(int argc, char *argv[])
         double min_bw = START_BW;
         double max_bw = START_BW;
         double bw = START_BW;
+        double bb_bw = START_BB_BW;
         bool found_min = false;
         bool found_max = false;
         double ratio = 0.0;
         do {
-            ratio = sim_and_compute(segment_size, seed, min_run, isr, ier, bw, mtbf, runtype);
+            ratio = sim_and_compute(segment_size, seed, min_run, isr, ier, bw, bb_bw, mtbf, runtype);
             std::cout << std::endl << "At " << bw << " (between "<< min_bw <<" and "<< max_bw <<" ), runtype = " << names[runtype] << " ratio = " << ratio << std::endl;
             if( ratio > 0.8 ) {
                 // too fast
@@ -260,7 +264,7 @@ int main(int argc, char *argv[])
         }
         while( max_bw - min_bw > 1e12 ) {
             bw = (min_bw + max_bw) / 2.0;   
-            ratio = sim_and_compute(segment_size, seed, min_run, isr, ier, bw, mtbf, runtype);
+            ratio = sim_and_compute(segment_size, seed, min_run, isr, ier, bw, bb_bw, mtbf, runtype);
             std::cout << std::endl << "At " << bw << " (between "<< min_bw <<" and "<< max_bw <<" ), runtype = " << names[runtype] << " ratio = " << ratio << " MTBF = " << mtbf << " s" << std::endl;
             if( ratio > 0.8 ) {
                 // too fast

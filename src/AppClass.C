@@ -16,7 +16,8 @@ std::ostream& operator<<(std::ostream& os, const AppClass& ac) {
               << "Output Time: " << (double)ac.output_time / TIME_UNIT <<  " (s)\t"
               << "Wall Time: " << (double)ac._wall_time / TIME_UNIT <<  " (s)\t"
               << "I/O Time: " << (double)ac.io_time / TIME_UNIT <<  " (s)\t"
-              << "Checkpoint Time: " << (double)ac.ckpt_time / TIME_UNIT <<  " (s)\t"
+              << "Checkpoint Time (FS): " << (double)ac.ckpt_time / TIME_UNIT <<  " (s)\t"
+              << "Checkpoint Time (Burst Buffer): " << (double)ac.bb_ckpt_time / TIME_UNIT <<  " (s)\t"
               << "Target Resource: " << ac.target_resource <<  "\t";
 }
 
@@ -27,6 +28,7 @@ AppClass::AppClass(System *_sys,
                    simt_t _wt,
                    simt_t _iot,
                    simt_t _ct,
+                   simt_t _bb_ct,
                    double _tr) :
     class_id(_sys->next_appclass_id),
     system(_sys),
@@ -36,6 +38,7 @@ AppClass::AppClass(System *_sys,
     _wall_time(_wt),
     io_time(_iot),
     ckpt_time(_ct),
+    bb_ckpt_time(_bb_ct),
     target_resource(_tr)
 {
     r1 = gradient[next_grad] >> 16;

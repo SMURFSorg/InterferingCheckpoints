@@ -10,21 +10,23 @@ std::ostream& operator<<(std::ostream& os, const System& sys) {
        << "Nodes: " << sys.nb_nodes << "\t"
        << "Cores per node: " << sys.cores_per_node << "\t"
        << "Bandwidth: " << sys.bandwidth <<  " (Byte/s)\t"
+       << "Burst Buffer Bandwidth: " << sys.bb_bandwidth <<  " (Byte/s)\t"
        << "Memory/node: " << sys.mem_per_node << " (Byte)\t"
        << "MTBF_ind: " << sys.mtbf_ind/TIME_UNIT << " (s)\t"
        << "MTBF_sys: " << sys.mtbf_ind/sys.nb_nodes/TIME_UNIT << " (s)\t";
     if( sys.fixed_checkpoint_interval == UNDEFINED_DATE ) {
         return os << "Checkpoint Interval: Daly\t";
     } else {
-        return os << "Checkpoint Interval: " << sys.fixed_checkpoint_interval/TIME_UNIT << "(s)\t";
+        return os << "Checkpoint Interval: " << sys.fixed_checkpoint_interval/TIME_UNIT << " (s)\t";
     }
 }
 
-System::System(const char *name, int _nodes, int _cores, double _band, double _mem, simt_t _mtbf_sys, simt_t min_duration) :
+System::System(const char *name, int _nodes, int _cores, double _band, double _bb_band, double _mem, simt_t _mtbf_sys, simt_t min_duration) :
     name(name),
     nb_nodes(_nodes),
     cores_per_node(_cores),
     bandwidth(_band),
+    bb_bandwidth(_bb_band),
     mem_per_node(_mem),
     classes(),
     mtbf_ind(ceil(_mtbf_sys*nb_nodes*TIME_UNIT)),
@@ -36,6 +38,7 @@ System::System(const char *name, int _nodes, int _cores, double _band, double _m
         {
             Debug{} << name << ":"
                       << " bandwidth = " << bandwidth/1e12 << " TB/s"
+                      << " burst buffer bandwidth (per node) = " << bb_bandwidth/1e9 << " GB/s"
                       << " mem per node = " << mem_per_node / 1e12 << " TB"
                       << " cores per node = " << cores_per_node
                       << " nodes = " << nb_nodes
@@ -69,7 +72,8 @@ void System::add_app_class(int nb_cores, double input, double output, simt_t wal
     simt_t output_time = ceil(TIME_UNIT * output_size / bandwidth);
     simt_t io_time = ceil(TIME_UNIT * io_size / bandwidth);
     simt_t ckpt_time = ceil(TIME_UNIT * ckpt_size / bandwidth);
-    AppClass *ac = new AppClass(this, app_size, input_time, output_time, wall_us, io_time, ckpt_time,
+    simt_t bb_ckpt_time = ceil(TIME_UNIT * ckpt_size / (double)app_size / bb_bandwidth);
+    AppClass *ac = new AppClass(this, app_size, input_time, output_time, wall_us, io_time, ckpt_time, bb_ckpt_time,
                                 target);
     classes.push_back(ac);
 }
@@ -189,7 +193,7 @@ void System::finalize(Simulation *_sim, unsigned int *seed)
                 std::cout << "= ";
             aci++;
         }
-        std::cout << std::endl;
+        std::cout << "(" << resource_sum/nb_nodes/TIME_UNIT/3600 << "h)" << std::endl;
 #endif
         
         finalized = true;

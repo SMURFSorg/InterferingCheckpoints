@@ -14,6 +14,7 @@ public:
     int nb_nodes;
     int cores_per_node;
     double bandwidth;
+    double bb_bandwidth;
     double mem_per_node;
     std::vector <AppClass *>classes;
     std::vector <App*>apps;
@@ -24,7 +25,7 @@ public:
     simt_t fixed_checkpoint_interval;
     simt_t min_duration;
     
-    System(const char *name, int _nodes, int _cores, double _band, double _mem, simt_t _mtbf_sys, simt_t min_duration);
+    System(const char *name, int _nodes, int _cores, double _band, double _bb_band, double _mem, simt_t _mtbf_sys, simt_t min_duration);
     ~System();
     void clear();
     void add_app_class(int nb_cores, double input, double output, simt_t wall, double io, double ckpt, double target);

@@ -1,3 +1,4 @@
+
 #ifndef Task_h
 #define Task_h
 
@@ -12,7 +13,7 @@ class Simulation;
 
 class Task {
 public:
-    typedef enum { NODE_FAULT, APP_FAILURE, CKPT_START, CKPT_END, APP_START, APP_END, IO_START, IO_END } type_t;
+    typedef enum { NODE_FAULT, APP_FAILURE, CKPT_START, CKPT_END, CKPT_IO_START, CKPT_IO_END, APP_START, APP_END, IO_START, IO_END } type_t;
     Simulation *sim;
     type_t type;
     simt_t date;
@@ -37,6 +38,12 @@ public:
             break;
         case Task::CKPT_END:
             return std::string("CKPT END");
+            break;
+        case Task::CKPT_IO_START:
+            return std::string("CKPT IO START");
+            break;
+        case Task::CKPT_IO_END:
+            return std::string("CKPT IO END");
             break;
         case Task::APP_START:
             return std::string("START");
@@ -101,13 +108,16 @@ public:
 };
 
 class AppFailureTask: public AppTask {
+    simt_t waste;
 public:
     AppFailureTask(Simulation *sim, simt_t _date, App* _app) :
-        AppTask(sim, Task::APP_FAILURE, _date, _app) { }
+    AppTask(sim, Task::APP_FAILURE, _date, _app),
+        waste(0){ }
 
     ~AppFailureTask() { }
 
     bool vstep(void);
+    simt_t wasted_time(void) const;
 };
 
 class AppEndTask: public AppTask {
@@ -147,6 +157,26 @@ public:
         AppTaskIO(sim, Task::CKPT_END, _date, _app) {    }
 
     ~CkptEndTask() { }
+
+    bool vstep(void);
+};
+
+class CkptIOStartTask: public AppTaskIO {
+public:
+    CkptIOStartTask(Simulation *sim, simt_t _date, App* _app) :
+        AppTaskIO(sim, Task::CKPT_IO_START, _date, _app) {    }
+
+    ~CkptIOStartTask() { }
+
+    bool vstep(void);
+};
+
+class CkptIOEndTask: public AppTaskIO {
+public:
+    CkptIOEndTask(Simulation *sim, simt_t _date, App* _app) :
+        AppTaskIO(sim, Task::CKPT_IO_END, _date, _app) {    }
+
+    ~CkptIOEndTask() { }
 
     bool vstep(void);
 };

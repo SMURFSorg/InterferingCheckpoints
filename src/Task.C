@@ -67,6 +67,8 @@ bool AppFailureTask::vstep(void) {
             << ", and its work remaining at last checkpoint is " << app->work_remaining_at_last_ckpt
             << std::endl;
 
+    waste = date - app->last_succesfull_ckpt;
+
     App *restarting_app = new App(app);
     app->remaining_work = 0;
     app->removealltasks(date);
@@ -74,6 +76,10 @@ bool AppFailureTask::vstep(void) {
     sim->schedule->update_sched_event(app, date);
 
     return true;
+}
+
+simt_t AppFailureTask::wasted_time(void) const {
+    return waste;
 }
 
 bool AppTask::step(void) {
@@ -135,10 +141,11 @@ bool CkptStartTask::vstep(void) {
 
 bool CkptEndTask::vstep(void) {
     Task *t = NULL;
-    Debug{} << "At " << date << ", " << *app << " succeeds checkpoint" << std::endl;
     app->start_working(date);
-    app->checkpoint_success(date);
-    sim->end_ckpt(date, app);
+    if(sim->end_ckpt(date, app)) {
+        Debug{} << "At " << date << ", " << *app << " succeeds checkpoint" << std::endl;
+        app->checkpoint_success(date);
+    }
     if( app->remaining_work <= 0 )
         throw std::runtime_error("Application is ending its checkpoint but no work remains");
     simt_t ckpt = app->ckpt_interval();
@@ -146,10 +153,21 @@ bool CkptEndTask::vstep(void) {
         t = new CkptStartTask(sim, date + ckpt, app);
     } else {
         app->remaining_io = app->app_class->output_time;
+        Debug{} << "Final task: setting the remaining_io to output for app " << *app << std::endl;
         t = new IOStartTask(sim, date + app->remaining_work, app);
     }
     app->addtask(t);
     return !app->completed;
+}
+
+bool CkptIOStartTask::vstep(void) {
+    sim->start_ckpt_io(date, app);
+    return true;
+}
+
+bool CkptIOEndTask::vstep(void) {
+    sim->end_ckpt_io(date, app);
+    return true;
 }
 
 bool IOStartTask::vstep(void) {

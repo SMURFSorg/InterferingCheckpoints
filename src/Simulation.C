@@ -86,7 +86,6 @@ bool Simulation::step(void) {
     return true;
 }
 
-
 /** SimSimpleInterference
  *    Two interfering I/O are slowed down proportionnaly to the
  *    number of nodes doing I/O.
@@ -220,11 +219,225 @@ bool SimSimpleInterference::start_ckpt(simt_t date, App *app)
     return true;
 }
 
-void SimSimpleInterference::end_ckpt(simt_t date, App *app)
+bool SimSimpleInterference::end_ckpt(simt_t date, App *app)
 {
     end_io(date, app);
+    return true;
 }
 
+
+/** SimSimpleInterferenceWithBurstBuffers
+ *    Two interfering I/O are slowed down proportionnaly to the
+ *    number of nodes doing I/O.
+ **/
+
+SimSimpleInterferenceWithBurstBuffers::~SimSimpleInterferenceWithBurstBuffers()
+{
+    tasks.clear();
+    io_tasks.clear();
+}
+
+void SimSimpleInterferenceWithBurstBuffers::reschedule_end_ios(int nb_nodes_doing_io, simt_t date)
+{
+    for(auto t2 = io_tasks.begin(); t2 != io_tasks.end(); ) {
+        AppTaskIO *t = *t2;
+        if( t->app->remaining_io > 0 ) {
+            if( t->app->current_iorate != (double)t->app->nb_nodes / (double)nb_nodes_doing_io ) {
+                Debug{} << "At " << date << ", " << *t->app << " Changes its io rate from " << t->app->current_iorate;
+                t->app->current_iorate = (double)t->app->nb_nodes / (double)nb_nodes_doing_io;
+                Debug{} << " To " << t->app->current_iorate << std::endl;
+                auto search = tasks.equal_range(t->date);
+                for(auto t3 = search.first; t3 != search.second; t3++) {
+                    if( t3->second == t) {
+                        tasks.erase(t3);
+                        break;
+                    }
+                }
+                Debug{} << *t->app << " was completing its io at " << t->date;
+                t->date = date + floor(t->app->remaining_io / t->app->current_iorate);
+                Debug{} << ". It now completes its at " << t->date << std::endl;
+                tasks.insert( std::pair<simt_t, Task*>(t->date, t));
+            }
+            t2++;
+        } else {
+            Debug{} << "Removing App Task for App " << t->app->app_index << ":" << t->app->instance_index << " because its remaining io is 0" << std::endl;
+            t2 = io_tasks.erase(t2);
+        }
+    }
+}
+
+int SimSimpleInterferenceWithBurstBuffers::update_remaining_ios(simt_t date)
+{
+    int nb_nodes_doing_io = 0;
+    
+    if( !(date_of_last_iorate_change != UNDEFINED_DATE ||
+          io_tasks.empty()) ) {
+        throw std::runtime_error("Tasks are registered in I/O tasks, but no date of last rate change is defined");
+    }
+    if( !(date_of_last_iorate_change == UNDEFINED_DATE ||
+          date_of_last_iorate_change <= date) ) {
+        std::stringstream msg;
+        msg << "Date of last rate change (" << date_of_last_iorate_change << ") is inconsistent with current date " << date;
+        throw std::runtime_error(msg.str());
+    }
+    for(auto t2 = io_tasks.begin(); t2 != io_tasks.end(); t2++) {
+        auto t = *t2;
+        simt_t delta = date - date_of_last_iorate_change;
+        Debug{}  << "App " << t->app->app_index << ":" << t->app->instance_index << " -- remaining io was " << t->app->remaining_io
+                 << ", delta is " << delta << ", and current iorate is " << t->app->current_iorate
+                 << " Thus new remaining io is ";
+        if(ceil(delta * t->app->current_iorate) > t->app->remaining_io + TIME_UNIT) {
+            std::stringstream msg;
+            msg << ceil(delta * t->app->current_iorate)
+                << " I/O would be transferred at this rate ("<< t->app->current_iorate <<"), which is more than the remaining I/O (" << t->app->remaining_io << ")";
+            throw std::runtime_error(msg.str());
+        }
+        if( ceil(delta * t->app->current_iorate) > t->app->remaining_io )
+            t->app->remaining_io = 0;
+        else
+            t->app->remaining_io = t->app->remaining_io - ceil(delta * t->app->current_iorate);
+        Debug{} << t->app->remaining_io << std::endl;
+        
+        if( t->app->remaining_io > 0 ) {
+            nb_nodes_doing_io += t->app->nb_nodes;
+        }
+    }
+    date_of_last_iorate_change = date;
+    return nb_nodes_doing_io;
+}
+
+void SimSimpleInterferenceWithBurstBuffers::start_remaining_io(simt_t date, App *app, AppTaskIO *task)
+{
+    app->addtask(task);
+    if(app->remaining_io > 0) {
+        int nb_nodes_doing_io = app->nb_nodes;
+        nb_nodes_doing_io += update_remaining_ios(date);
+
+        app->current_iorate = 1.0;
+        for(auto t: io_tasks) {
+            if( t == task )
+                throw std::runtime_error("Task already in the io_tasks vector");
+        }
+        io_tasks.push_back(task);
+
+        reschedule_end_ios(nb_nodes_doing_io, date);
+    } 
+}
+
+void SimSimpleInterferenceWithBurstBuffers::cancel_concurrent_io(App *app)
+{
+    for(auto t2 = io_tasks.begin(); t2 != io_tasks.end(); ) {
+        auto t = *t2;
+        if( t->app == app ) {
+            if( t->type != Task::CKPT_IO_END )
+                throw std::runtime_error("There is another I/O task than a CKPT IO END");
+            t2 = io_tasks.erase(t2);
+            app->removetask(t);
+            for(auto t3 = tasks.begin(); t3 != tasks.end(); ) {
+                auto t4 = t3->second;
+                if( t4 == t )
+                    t3 = tasks.erase(t3);
+                else
+                    t3++;
+            }
+        } else
+            t2++;
+    }
+}
+
+void SimSimpleInterferenceWithBurstBuffers::start_io(simt_t date, App *app)
+{
+    AppTaskIO *t = nullptr;
+
+    if( app->is_checkpointing() ) {
+        /* We need to stop this checkpoint, as it would compete with the
+         * current (final) output */
+        cancel_concurrent_io(app);
+    }
+    
+    // Value of remaining_io is decided up, because it depends
+    // if it is a restarting application or an initial run
+    t = new IOEndTask(this, date + app->remaining_io, app);
+    start_remaining_io(date, app, t);
+}
+
+void SimSimpleInterferenceWithBurstBuffers::end_io(simt_t date, App *app)
+{
+    bool found_task = false;
+    int nb_nodes_doing_io = update_remaining_ios(date);
+    for(auto i = io_tasks.begin(); i != io_tasks.end();) {
+        AppTask *ai = static_cast<AppTask*>(*i);
+        if( ai->app == app ) {
+            i = io_tasks.erase(i);
+            if( found_task == true ) throw std::runtime_error("Task appears multiple times in the I/O tasks list");
+            found_task = true;
+        } else {
+            i++;
+        }
+    }
+    if(found_task) {
+        reschedule_end_ios(nb_nodes_doing_io, date);
+    }
+}
+
+bool SimSimpleInterferenceWithBurstBuffers::start_ckpt(simt_t date, App *app)
+{
+    AppTaskIO *t = nullptr;
+
+    if( app->is_checkpointing() ) {
+        Debug{}  << "App " << *app << " is already checkpointing, updating the remaining work but not doing a new checkpoint" << std::endl;
+        app->stop_working(date);
+        app->start_working(date);
+        if( app->remaining_work <= 0 )
+            throw std::runtime_error("Application is starting a checkpoint but no work remains");
+        simt_t ckpt = app->ckpt_interval();
+        if(ckpt < app->remaining_work) {
+            t = new CkptStartTask(this, date + ckpt, app);
+        } else {
+            Debug{}  << "App " << *app << " will finish soon, cancelling ongoing checkpoint and scheduling final output" << std::endl;
+            cancel_concurrent_io(app);            
+            app->remaining_io = app->app_class->output_time;
+            t = new IOStartTask(this, date + app->remaining_work, app);
+        }        
+        app->addtask(t);
+        return false;
+    }
+    
+    Debug{}  << "App " << *app << " is not checkpointing, starting a new checkpoint" << std::endl;
+    app->start_checkpointing();
+    t = new CkptEndTask(this, date + app->app_class->bb_ckpt_time, app);
+    app->addtask(t);
+    // In this mode, checkpoints always start now
+    return true;
+}
+
+bool SimSimpleInterferenceWithBurstBuffers::end_ckpt(simt_t date, App *app)
+{
+    AppTaskIO *t = nullptr;
+
+    t = new CkptIOStartTask(this, date, app);
+    app->addtask(t);
+
+    return false; /* No, the checkpoint was not succesfull yet, it will be at the CkptIOEnd event */
+}
+
+void SimSimpleInterferenceWithBurstBuffers::start_ckpt_io(simt_t date, App *app)
+{
+    AppTaskIO *t = nullptr;
+
+    app->remaining_io = app->app_class->ckpt_time;
+    Debug{} << "At " << date << ", " << *app << " Starts its checkpoint I/O, planned for " << app->remaining_io << " additional time " << std::endl;
+    t = new CkptIOEndTask(this, date + app->remaining_io, app);
+    start_remaining_io(date, app, t);
+}
+
+void SimSimpleInterferenceWithBurstBuffers::end_ckpt_io(simt_t date, App *app)
+{
+    Debug{} << "At " << date << ", " << *app << " ends its checkpoint I/O and succeeds checkpoint" << std::endl;
+    app->checkpoint_success(date);
+    app->stop_checkpointing();
+    end_io(date, app);
+}
 
 /** SimOrderedIOBlockingFCFS */
 
@@ -291,9 +504,10 @@ bool SimOrderedIOBlockingFCFS::start_ckpt(simt_t date, App *app)
     return true;
 }
 
-void SimOrderedIOBlockingFCFS::end_ckpt(simt_t start_date, App *app)
+bool SimOrderedIOBlockingFCFS::end_ckpt(simt_t start_date, App *app)
 {
     end_io(start_date, app);
+    return true;
 }
 
 /** SimNoInterference */
@@ -336,11 +550,131 @@ bool SimNoInterference::start_ckpt(simt_t start_date, App *app)
     return true;
 }
 
-void SimNoInterference::end_ckpt(simt_t start_date, App *app)
+bool SimNoInterference::end_ckpt(simt_t start_date, App *app)
 {
     end_io(start_date, app);
+    return true;
 }
 
+
+/** SimNoInterferenceWithBurstBuffers */
+
+SimNoInterferenceWithBurstBuffers::~SimNoInterferenceWithBurstBuffers()
+{
+    tasks.clear();
+    io_tasks.clear();
+}
+
+void SimNoInterferenceWithBurstBuffers::cancel_concurrent_io(App *app)
+{
+    for(auto t2 = io_tasks.begin(); t2 != io_tasks.end(); ) {
+        auto t = *t2;
+        if( t->app == app ) {
+            if( t->type != Task::CKPT_IO_END )
+                throw std::runtime_error("There is another I/O task than a CKPT IO END");
+            t2 = io_tasks.erase(t2);
+            app->removetask(t);
+            for(auto t3 = tasks.begin(); t3 != tasks.end(); ) {
+                auto t4 = t3->second;
+                if( t4 == t )
+                    t3 = tasks.erase(t3);
+                else
+                    t3++;
+            }
+        } else
+            t2++;
+    }
+}
+
+void SimNoInterferenceWithBurstBuffers::start_io(simt_t start_date, App *app)
+{
+    if( app->is_checkpointing() ) {
+        /* We need to stop this checkpoint, as it would compete with the
+         * current (final) output */
+        cancel_concurrent_io(app);
+    }
+    
+    IOEndTask *t = new IOEndTask(this, start_date + app->remaining_io, app);
+    io_tasks.push_back(t);
+    app->addtask(t);
+}
+
+void SimNoInterferenceWithBurstBuffers::end_io(simt_t start_date, App *app)
+{
+    bool found_task = false;
+    for(auto i = io_tasks.begin(); i != io_tasks.end();) {
+        AppTask *ai = static_cast<AppTask*>(*i);
+        if( ai->app == app ) {
+            app->remaining_io = 0;
+            i = io_tasks.erase(i);
+            if( found_task == true ) throw std::runtime_error("Task appears multiple times in the I/O tasks list");
+            found_task = true;
+        } else {
+            i++;
+        }
+    }
+}
+
+bool SimNoInterferenceWithBurstBuffers::start_ckpt(simt_t start_date, App *app)
+{
+    AppTaskIO *t = nullptr;
+    
+    if( app->is_checkpointing() ) {
+        Debug{}  << "App " << *app << " is already checkpointing, updating the remaining work but not doing a new checkpoint" << std::endl;
+        app->stop_working(start_date);
+        app->start_working(start_date);
+        if( app->remaining_work <= 0 )
+            throw std::runtime_error("Application is starting a checkpoint but no work remains");
+        simt_t ckpt = app->ckpt_interval();
+        if(ckpt < app->remaining_work) {
+            t = new CkptStartTask(this, start_date + ckpt, app);
+        } else {
+            Debug{}  << "App " << *app << " will finish soon, cancelling ongoing checkpoint and scheduling final output" << std::endl;
+            cancel_concurrent_io(app);            
+            app->remaining_io = app->app_class->output_time;
+            t = new IOStartTask(this, start_date + app->remaining_work, app);
+        }        
+        app->addtask(t);
+        return false;
+    }
+    
+    Debug{}  << "App " << *app << " is not checkpointing, starting a new checkpoint" << std::endl;
+    app->start_checkpointing();
+    
+    app->remaining_io = app->app_class->bb_ckpt_time;
+    t = new CkptEndTask(this, start_date + app->remaining_io, app);
+    app->addtask(t);
+    return true;
+}
+
+bool SimNoInterferenceWithBurstBuffers::end_ckpt(simt_t start_date, App *app)
+{
+    AppTaskIO *t = nullptr;
+
+    t = new CkptIOStartTask(this, start_date, app);
+    app->addtask(t);
+
+    return false; /* No, the checkpoint was not succesfull yet, it will be at the CkptIOEnd event */
+}
+
+void SimNoInterferenceWithBurstBuffers::start_ckpt_io(simt_t date, App *app)
+{
+    AppTaskIO *t = nullptr;
+
+    app->remaining_io = app->app_class->ckpt_time;
+    Debug{} << "At " << date << ", " << *app << " Starts its checkpoint I/O, planned for " << app->remaining_io << " additional time " << std::endl;
+    t = new CkptIOEndTask(this, date + app->remaining_io, app);
+    io_tasks.push_back(t);
+    app->addtask(t);
+}
+
+void SimNoInterferenceWithBurstBuffers::end_ckpt_io(simt_t date, App *app)
+{
+    Debug{} << "At " << date << ", " << *app << " ends its checkpoint I/O and succeeds checkpoint" << std::endl;
+    app->checkpoint_success(date);
+    app->stop_checkpointing();
+    end_io(date, app);
+}
 
 /** SimOrderedIOFCFS */
 
@@ -446,7 +780,7 @@ bool SimOrderedIOFCFS::start_ckpt(simt_t start_date, App *app)
     return false;
 }
 
-void SimOrderedIOFCFS::end_ckpt(simt_t start_date, App *app)
+bool SimOrderedIOFCFS::end_ckpt(simt_t start_date, App *app)
 {
     bool found_task = false;
     for(auto i = io_tasks.begin(); i != io_tasks.end();) {
@@ -460,6 +794,7 @@ void SimOrderedIOFCFS::end_ckpt(simt_t start_date, App *app)
             i++;
         }
     }
+    return true;
 }
 
 /** SimOrderedIOCoop */
@@ -530,7 +865,7 @@ double SimOrderedIOCoop::heuristic(simt_t date, io_request_t req)
         if( r.checkpoint ) {
             Wi += r.app->nb_nodes * (d(r) + vi);
         } else {
-            Wi += r.app->nb_nodes * r.app->nb_nodes / r.app->app_class->system->mtbf_ind * (r.app->app_class->ckpt_time + d(r) + vi / 2.0);
+            Wi += r.app->nb_nodes * r.app->nb_nodes * vi / r.app->app_class->system->mtbf_ind * (r.app->app_class->ckpt_time + d(r) + vi / 2.0);
         }
     }
 
@@ -680,10 +1015,11 @@ bool SimOrderedIOCoop::start_ckpt(simt_t start_date, App *app)
     return false;
 }
 
-void SimOrderedIOCoop::end_ckpt(simt_t start_date, App *app)
+bool SimOrderedIOCoop::end_ckpt(simt_t start_date, App *app)
 {
     Debug{} << "## Checkpoint of " << *app << " Ends at date " << start_date << std::endl;
     end_io(start_date, app);
+    return true;
 }
 
 void SimOrderedIOCoop::clear_app(App *app,simt_t date)

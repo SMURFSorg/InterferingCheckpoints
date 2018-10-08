@@ -108,6 +108,8 @@ void PNGTrace::output(const std::string filename, simt_t at_date)
             case Task::APP_START:
             case Task::CKPT_END:
             case Task::IO_END:
+            case Task::CKPT_IO_START:
+            case Task::CKPT_IO_END:
                 ns.state = RUNNING;
                 ns.app_id = se->app_id;
                 break;
@@ -212,7 +214,7 @@ std::tuple<simt_t, simt_t, simt_t, simt_t, simt_t> StatTrace::getStat(simt_t int
     intv_length *= TIME_UNIT;
     if( max_date - min_date < intv_length ) {
         std::cerr << "Usable interval: " << min_date / TIME_UNIT << " - " << max_date / TIME_UNIT << " = " << (max_date-min_date)/TIME_UNIT/3600 << "h"
-                  << " is smaller than requested interval " << intv_length << std::endl;
+                  << " is smaller than requested interval " << intv_length/TIME_UNIT/3600 << "h" << std::endl;
         throw std::runtime_error("Interval too big");
     }
     simt_t offset = (simt_t)floor(((double)rand_r(&seed)/RAND_MAX) * (max_date - min_date - intv_length));
@@ -266,10 +268,9 @@ void StatTrace::interrupt_action(const AppTask *t, app_action_t new_act) {
     auto ai = app_status.find(t->app->app_index);
     assert(ai != app_status.end());
     if(new_act == WASTING) {
+        const AppFailureTask *aft = static_cast<const AppFailureTask*>(t);
         for(auto pe = stat_event.rbegin(); pe != stat_event.rend(); pe++) {
-            if(pe->app_id == ai->first) {
-                if(pe->event_type == CKPT)
-                    break;
+            if( (pe->app_id == ai->first) && (pe->event_date >= aft->date - aft->wasted_time()) ) {
                 pe->event_type = WASTING;
             }
         }
@@ -339,6 +340,10 @@ StatTrace &StatTrace::operator <<(const Task *task) {
             break;
         case Task::IO_START:
             interrupt_action(t, IO);
+            break;
+        case Task::CKPT_IO_START:
+        case Task::CKPT_IO_END:
+            /* These are transparent events */
             break;
         }
     }

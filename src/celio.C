@@ -60,7 +60,7 @@ bool cmdOptionExists(char** begin, char** end, const std::string& option)
 }
 
 #undef DOUBLE_CHECKS
-#define DOUBLE_CHECKS 1
+#define DOUBLE_CHECKS 0
 
 int main(int argc, char *argv[])
 {
@@ -69,12 +69,17 @@ int main(int argc, char *argv[])
       std::ofstream ostrm("/tmp/debug");
       Debug::stream = &ostrm;
     */
+#if !DOUBLE_CHECKS
     struct timeval now, before, diff;
-    bool coop = true, fcfs = true, no = true, simple = true, baseline = true, header = true, blockingfcfs = true;
+#else
+    struct timeval now, before;
+#endif
+    bool coop = true, fcfs = true, no = true, simple = true, baseline = true, header = true, blockingfcfs = true, bb_simple = true, bb_no = true;
     gettimeofday(&now, NULL);
     unsigned int seed = (now.tv_usec * getpid()) ^ now.tv_sec;
     seed = getCmdOption(argv, argv+argc, "-s", seed);
     double bw = getCmdOption(argv, argv+argc, "-b", 1e12);
+    double bb_bw = getCmdOption(argv, argv+argc, "-bb", 1e10);
     double mtbf = getCmdOption(argv, argv+argc, "-m", 24.0*3600.0);
     unsigned int N = getCmdOption(argv, argv+argc, "-n", (unsigned int)1);
     double ckpt_interval = getCmdOption(argv, argv+argc, "-c", -1.0);
@@ -95,8 +100,10 @@ int main(int argc, char *argv[])
     if( cmdOptionExists(argv, argv+argc, "-B") ) baseline = false;
     if( cmdOptionExists(argv, argv+argc, "-BF") ) blockingfcfs = false;
     if( cmdOptionExists(argv, argv+argc, "-H") ) header = false;
+    if( cmdOptionExists(argv, argv+argc, "-BB") ) bb_simple = false;
+    if( cmdOptionExists(argv, argv+argc, "-BBN") ) bb_no = false;
     
-    System system("cielo", 17784, 16, bw, 32e9, mtbf, min_run);
+    System system("cielo", 17784, 16, bw, bb_bw, 32e9, mtbf, min_run);
    
     Schedule s(&system);
     
@@ -104,6 +111,12 @@ int main(int argc, char *argv[])
     system.add_app_class(4096, 0.05, 2.2, 64.0*3600.0, 0.0, 1.85, 0.05);
     system.add_app_class(32768, 0.7, 0.43, 128.0*3600.0, 0.05, 3.5, 0.15);
     system.add_app_class(30000, 0.1, 2.7, 157.2*3600.0, 20.0, 0.85, 0.1);
+
+    if( ckpt_interval != -1.0 ) {
+        system.set_fixed_checkpoint_interval(ckpt_interval);
+    } else {
+        system.set_daly_checkpoint_interval();
+    }
 
     if( header ) {
         std::cout << "## System: " << system << std::endl;
@@ -156,11 +169,14 @@ int main(int argc, char *argv[])
                       << "Convergence: " << converged
                       << std::endl;
         }
+
+        /* Baseline may have changed the checkpoint interval; restore it */
         if( ckpt_interval != -1.0 ) {
             system.set_fixed_checkpoint_interval(ckpt_interval);
         } else {
             system.set_daly_checkpoint_interval();
         }
+
         if( coop ) {
             s.clear();
             system.clear();
@@ -361,7 +377,87 @@ int main(int argc, char *argv[])
                       << "Convergence: " << converged
                       << std::endl;
         }
+        if(bb_simple) {
+            s.clear();
+            system.clear();
+            StatTrace t(system.nb_nodes, isr, ier);
 
+            SimSimpleInterferenceWithBurstBuffers sim(&s, t, seed);
+        
+            s.reschedule_apps(0);
+
+            converged = true;
+            while( sim.step() ) {
+#if DOUBLE_CHECKS
+                std::cerr << "     " << sim.cur_date() << "         \r";
+                std::cerr.flush();
+#else
+                gettimeofday(&now, NULL);
+                timersub(&now, &before, &diff);
+                if( diff.tv_sec*1e6 + diff.tv_usec > 5e5 ) {
+                    std::cerr << "     " << sim.cur_date() << "         \r";
+                    std::cerr.flush();
+                    before = now;
+                }
+#endif
+                if( sim.cur_date() > 20.0 * min_run ) {
+                    converged = false;
+                    break;
+                }
+            }
+
+            auto r = t.getStat(segment_size, seed);
+            std::cout << "Simple Interference With Burst Buffers: WORK/IO/CKPT/WASTED/TOTAL (s.node) "
+                      << std::get<0>(r)/TIME_UNIT << " "
+                      << std::get<1>(r)/TIME_UNIT << " "
+                      << std::get<2>(r)/TIME_UNIT << " "
+                      << std::get<3>(r)/TIME_UNIT << " "
+                      << std::get<4>(r)/TIME_UNIT << " "
+                      << "Seed: " << seed << " "
+                      << "Convergence: " << converged
+                      << std::endl;
+        }
+        if(bb_no) {
+            s.clear();
+            system.clear();
+            StatTrace t(system.nb_nodes, isr, ier);
+
+            SimNoInterferenceWithBurstBuffers sim(&s, t, seed);
+        
+            s.reschedule_apps(0);
+
+            converged = true;
+            while( sim.step() ) {
+#if DOUBLE_CHECKS
+                std::cerr << "     " << sim.cur_date() << "         \r";
+                std::cerr.flush();
+#else
+                gettimeofday(&now, NULL);
+                timersub(&now, &before, &diff);
+                if( diff.tv_sec*1e6 + diff.tv_usec > 5e5 ) {
+                    std::cerr << "     " << sim.cur_date() << "         \r";
+                    std::cerr.flush();
+                    before = now;
+                }
+#endif
+                if( sim.cur_date() > 20.0 * min_run ) {
+                    converged = false;
+                    break;
+                }
+            }
+
+            auto r = t.getStat(segment_size, seed);
+            std::cout << "No Interference With Burst Buffers: WORK/IO/CKPT/WASTED/TOTAL (s.node) "
+                      << std::get<0>(r)/TIME_UNIT << " "
+                      << std::get<1>(r)/TIME_UNIT << " "
+                      << std::get<2>(r)/TIME_UNIT << " "
+                      << std::get<3>(r)/TIME_UNIT << " "
+                      << std::get<4>(r)/TIME_UNIT << " "
+                      << "Seed: " << seed << " "
+                      << "Convergence: " << converged
+                      << std::endl;
+        }
+        
         seed += now.tv_sec;
     }
         
